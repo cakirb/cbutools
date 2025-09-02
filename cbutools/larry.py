@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 from subprocess import run
@@ -32,8 +33,8 @@ def process_larry(files, valid_CBC=None, debug=False):
 
     """
     # Making a temporary directory
-    temp = TemporaryDirectory(prefix=".intermediate_cutadapt_", dir="./")
-    tempDIR = temp.name + "/"
+    tempDIR = ".intermediate_cutadapt/"
+    os.makedirs(tempDIR, exist_ok=True)
 
     # Trimming the files with cutadapt to retain only larry matching barcodes
     command1 = (

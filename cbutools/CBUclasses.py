@@ -156,7 +156,7 @@ def plot_barcodes_no(x):
     x = x.sort_values(ascending=False)
     plt.plot(range(len(x.index)), x)
     ax = plt.gca()
-    ax.yaxis.get_major_locator().set_params(integer=True)
+    #ax.yaxis.get_major_locator().set_params(integer=True)
     plt.show()
 
 
