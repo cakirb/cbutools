@@ -7,7 +7,7 @@ from .CBUclasses import CBUSeries
 from tempfile import TemporaryDirectory
 
 
-def process_larry(files, valid_CBC=None, debug=False):
+def process_larry(files, valid_CBC=None, debug=False, cores=0):
     """Retrieve CBUSeries from LARRY fastq files
 
     Processes 10x fastq files (read1 and read2) containing LARRY barcode
@@ -36,9 +36,11 @@ def process_larry(files, valid_CBC=None, debug=False):
     tempDIR = ".intermediate_cutadapt/"
     os.makedirs(tempDIR, exist_ok=True)
 
+    j = f"-j {cores}" if cores is not None else ""
+
     # Trimming the files with cutadapt to retain only larry matching barcodes
     command1 = (
-        f"cutadapt -g TTGCTAGGAGAGACCATATG...ATGTCTGGATCCGATATCGC "
+        f"cutadapt {j} -g TTGCTAGGAGAGACCATATG...ATGTCTGGATCCGATATCGC "
         f'-o {tempDIR}bar1.fq -p {tempDIR}cbcumi1.fq {files["r2"]} {files["r1"]} '
         f"--discard-untrimmed --pair-filter=both"
     )
@@ -48,7 +50,7 @@ def process_larry(files, valid_CBC=None, debug=False):
     print(out1.stdout)
 
     command2 = (
-        f'cutadapt -g "NNNNTGNNNNCANNNNACNNNNGANNNNGTNNNNAGNNNN;min_overlap=36" '
+        f'cutadapt {j} -g "NNNNTGNNNNCANNNNACNNNNGANNNNGTNNNNAGNNNN;min_overlap=36" '
         f"-o {tempDIR}bar2.fq -p {tempDIR}cbcumi2.fq {tempDIR}bar1.fq {tempDIR}cbcumi1.fq "
         f"--discard-untrimmed --action=retain --pair-filter=both"
     )
