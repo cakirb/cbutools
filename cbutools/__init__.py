@@ -5,14 +5,20 @@ import pandas as pd
 from . import hamming
 from . import CBUclasses
 from .CBUclasses import load_barcodes
-import papermill as pm
 from pathlib import Path
 from subprocess import run
 
 HERE = Path(__file__).parent
 
 
-def get_barcodes(files, type="larry", valid_CBC=None, save="barcodes.csv"):
+def get_barcodes(
+    files,
+    type="larry",
+    valid_CBC=None,
+    save="barcodes.csv",
+    cores=1,
+    intermediate_dir=None,
+):
     """Retrieve barcodes from fastq
 
     Uses one a of the recipes to read barcodes from read1 and read2 files
@@ -28,6 +34,11 @@ def get_barcodes(files, type="larry", valid_CBC=None, save="barcodes.csv"):
         List or array with valid cell barcodes
     save : string
         Path where the barcode counts will be saved
+    cores : int
+        Number of cores passed to cutadapt.
+    intermediate_dir : path-like, optional
+        Directory used for cutadapt intermediate files. If omitted, a unique
+        temporary directory is used.
 
     Returns
     --------
@@ -36,7 +47,12 @@ def get_barcodes(files, type="larry", valid_CBC=None, save="barcodes.csv"):
 
     """
     if type == "larry":
-        counts = process_larry(files, valid_CBC=valid_CBC)
+        counts = process_larry(
+            files,
+            valid_CBC=valid_CBC,
+            cores=cores,
+            intermediate_dir=intermediate_dir,
+        )
         return counts
 
 
@@ -73,6 +89,14 @@ def get_barcodes_report(
         whether source code should be included in the report
 
     """
+    try:
+        import papermill as pm
+    except ImportError as exc:
+        raise ImportError(
+            "Report generation requires the optional report dependencies. "
+            "Install cbutools[report]."
+        ) from exc
+
     if save_path is str:
         save_path = Path(save_path)
     ipynb_path = Path(save_path, prefix).with_suffix(".ipynb")

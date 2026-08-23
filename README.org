@@ -32,6 +32,16 @@ Optionally, valid cell barcodes (CBC) can be provided, for instance real cells (
 CBUSeries can be subsequently processed to obtain the most faithful barcode assignment.
 
 For an example how to filter and assign barcodes to cells have a look at the report_template located in ~cbutools/templates/larry1_template.ipynb~
+
+Workflow engines can pass their allocated cores and a task-local intermediate directory explicitly:
+#+begin_src python
+cbu.get_barcodes(
+    files={"r1": read1, "r2": read2},
+    cores=task_cpus,
+    intermediate_dir=".intermediate_cutadapt",
+)
+#+end_src
+The default remains a unique, automatically cleaned temporary directory.
 ** CBUSeries
 This object behaves just like pandas Series with a Multiindex but has additional methods:
 - ~plot_barcode_no~ - plots the number of observed barcodes per CBC

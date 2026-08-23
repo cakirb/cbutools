@@ -1,112 +1,104 @@
-import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
-from IPython.core.debugger import set_trace
+import numpy as np
 
 
-def map2d(x, y, func, symmetry=False):
-    """Apply function element-wise to 2 arrays and construct a matrix
+def sequences_to_numeric(seqs):
+    """Convert equal-length string sequences to a numeric matrix."""
+    if len(seqs) == 0:
+        return np.empty((0, 0), dtype=np.uint8)
 
-    Calls function elementwise on iterable 1d objects x and y and returns
-    a matrix with the output values.
-
-    Parameters
-    ----------
-    x : Array-like
-        1d array
-    y : Array-like
-        1d array
-    func : function
-        A two-argument function returning a value to be inserted into the matrix
-    symmetry : bool
-        By setting symmetry to True, function assumes symmetry in the output matrix
-        thus only calculates the upper triangle and copying results into the lower
-        triangle (thus cutting the computation time in half). Note: this involves
-        computing the transpose so may consume more memory
-
-    Returns
-    -------
-    np.array
-        2d array with results
-
-    """
-    mat = np.zeros((len(x), len(y)))
-
-    if not symmetry:
-        for col in range(0, len(x)):
-            for row in range(0, len(y)):
-                mat[row, col] = func(x[row], y[col])
-    else:
-        n = 0
-        for col in range(0, len(x)):
-            n += 1
-            for row in range(n):
-                mat[row, col] = func(x[row], y[col])
-        mat = mat + np.triu(mat, k=1).T
-    return mat
-
-
-def hamming_distance(s1, s2):
-    """Returns the Hamming distance between equal-length sequences"""
-    if len(s1) != len(s2):
+    if len({len(seq) for seq in seqs}) != 1:
         raise ValueError("Undefined for sequences of unequal length")
-    return sum(el1 != el2 for el1, el2 in zip(s1, s2))
+
+    char_array = np.array([list(seq) for seq in seqs], dtype="U1")
+    return char_array.view(np.uint32).astype(np.uint8)
 
 
-def hamming_filter(counts, min_distance=3):
-    """Filters out barcodes based on Hamming distance.
+def compute_hamming_matrix(seqs):
+    """Compute a full matrix of pairwise Hamming distances."""
+    if len(seqs) == 0:
+        return np.empty((0, 0), dtype=np.int32)
+    if len(seqs) == 1:
+        return np.zeros((1, 1), dtype=np.int32)
 
-    Calculates hamming distances between each pair of barcodes, then removes
-    from each pair with distance below the threshold the less abundant barcode.
+    numeric = sequences_to_numeric(seqs)
+    n, sequence_length = numeric.shape
+    distances = np.empty((n, n), dtype=np.int32)
+
+    # Bound the temporary broadcast array while retaining the public square
+    # matrix returned by the original implementation.
+    max_temporary_elements = 64 * 1024 * 1024
+    rows_per_block = max(
+        1,
+        min(
+            n,
+            max_temporary_elements // max(1, n * sequence_length),
+        ),
+    )
+    for start in range(0, n, rows_per_block):
+        stop = min(start + rows_per_block, n)
+        distances[start:stop] = np.sum(
+            numeric[start:stop, np.newaxis, :] != numeric[np.newaxis, :, :],
+            axis=2,
+            dtype=np.int32,
+        )
+
+    return distances
+
+
+def hamming_filter(counts, min_distance=3, plot=True):
+    """Filter less-abundant sequences below a Hamming-distance threshold.
 
     Parameters
     ----------
-    counts : pd.Series object
-        sequences in the index and counts in values
+    counts : pandas.Series
+        Sequences in the index and counts in the values.
     min_distance : int
-        Minimum hamming distance threshold, barcodes with distance < threshold are discarded
+        Sequences with distance below this threshold are compared.
+    plot : bool
+        Whether to display a histogram of pairwise Hamming distances.
 
     Returns
     -------
-    pd.Series or CBUSeries or CBSeries
-        Filtered CBUSeries
-
+    pandas.Index, list, dict
+        Sequences to keep, sequences to reject, and tied sequences.
     """
     print(f"Filtering using Hamming distance threshold of {min_distance}...")
-    seqs = counts.index.values
-    seqs = seqs.astype(str)
+    seqs = counts.index.values.astype(str)
     n = len(seqs)
 
-    # Computing pairwise hamming distances
-    hdist = map2d(seqs, seqs, hamming_distance, symmetry=True)
+    if n == 0:
+        return counts.index, [], {}
 
-    # Printing histogram for to see hamming distances
-    no, bins, patches = plt.hist(hdist[np.triu_indices_from(hdist, k=1)], bins=50)
-    plt.title("Pairwise hamming distance")
-    plt.show()
+    hdist = compute_hamming_matrix(seqs)
+
+    if plot and n > 1:
+        upper_triangle = np.triu_indices_from(hdist, k=1)
+        plt.hist(hdist[upper_triangle], bins=50)
+        plt.title("Pairwise Hamming Distance")
+        plt.xlabel("Hamming Distance")
+        plt.ylabel("Frequency")
+        plt.show()
 
     toreject = []
     ties = {}
-    for i in range(n):
-        x = seqs[i]  # string
-        xcount = counts[x]  # integer
+    count_values = counts.values
 
-        row = hdist[i, :]  # np.array
-        belowtr = np.nonzero(row < min_distance)[0]  # np array
-        belowtr = belowtr[belowtr != i]
-        belowtr_counts = counts.iloc[belowtr]  # pd.Series
+    for i, seq in enumerate(seqs):
+        below_threshold = (hdist[i] < min_distance) & (np.arange(n) != i)
+        if not below_threshold.any():
+            continue
 
-        if np.any(xcount < belowtr_counts):
-            toreject.append(x)
-        elif xcount == belowtr_counts.max():
-            # print(f"{x} {xcount}")
-            # print(f"{counts[belowtr]}")
-            ties[x] = list(belowtr_counts.index[belowtr_counts == belowtr_counts.max()])
+        neighbor_indices = np.flatnonzero(below_threshold)
+        neighbor_counts = count_values[neighbor_indices]
+        seq_count = count_values[i]
 
-    tokeep = counts.index.values[~counts.index.isin(toreject)]
+        if np.any(seq_count < neighbor_counts):
+            toreject.append(seq)
+        elif seq_count == neighbor_counts.max():
+            tied = neighbor_indices[neighbor_counts == neighbor_counts.max()]
+            ties[seq] = list(seqs[tied])
 
-    print(
-        f"Passed: {len(tokeep)}\n" f"Rejected: {len(toreject)}\n" f"Ties: {len(ties)}"
-    )
-
+    tokeep = counts.index[~counts.index.isin(toreject)]
+    print(f"Passed: {len(tokeep)}\nRejected: {len(toreject)}\nTies: {len(ties)}")
     return tokeep, toreject, ties
