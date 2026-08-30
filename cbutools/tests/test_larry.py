@@ -28,6 +28,25 @@ def test_debug():
     assert os.path.isfile(tempDIR.name + "/bar2.fq")
 
 
+def test_explicit_intermediate_dir(tmp_path):
+    """Checking caller-controlled intermediate directories used by workflows."""
+    file1 = str(HERE / "data/mock_larry_cutadapt_r1.fq")
+    file2 = str(HERE / "data/mock_larry_cutadapt_r2.fq")
+    intermediate_dir = tmp_path / ".intermediate_cutadapt"
+
+    bcu, returned_dir = cbu.larry.process_larry(
+        {"r1": file1, "r2": file2},
+        debug=True,
+        cores=1,
+        intermediate_dir=intermediate_dir,
+    )
+
+    assert isinstance(bcu, cbu.CBUclasses.CBUSeries)
+    assert returned_dir == intermediate_dir.resolve()
+    assert (returned_dir / "bar1.fq").is_file()
+    assert (returned_dir / "bar2.fq").is_file()
+
+
 def test_cutadapt():
     """Checking if cutadapt extracts barcodes correctly"""
     file1 = str(HERE / "data/mock_larry_cutadapt_r1.fq")

@@ -3,43 +3,42 @@
 import cbutools as cbu
 import numpy as np
 import pandas as pd
-from pathlib import Path
-import matplotlib.pyplot as plt
-
-HERE = Path(__file__).parent
+import pytest
 
 
-def test_map2d():
-    x = np.array([1, 2, 3, 4])
-    y = np.array([50, 60, 70, 80])
-
-    out = cbu.hamming.map2d(x, y, lambda a, b: a * b)
-
-    correct = np.array(
+def test_compute_hamming_matrix():
+    seqs = np.array(["AAAA", "AAAT", "AATT", "TTTT"])
+    observed = cbu.hamming.compute_hamming_matrix(seqs)
+    expected = np.array(
         [
-            [50, 60, 70, 80],
-            [100, 120, 140, 160],
-            [150, 180, 210, 240],
-            [200, 240, 280, 320],
+            [0, 1, 2, 4],
+            [1, 0, 1, 3],
+            [2, 1, 0, 2],
+            [4, 3, 2, 0],
         ]
     )
-    assert np.array_equal(out, correct)
+    assert np.array_equal(observed, expected)
 
 
-def test_map2d_sym():
-    """Like test_map2d but with the symmetry option True"""
-    x = np.array([1, 2, 3, 4])
+def test_compute_hamming_matrix_empty_and_single():
+    assert cbu.hamming.compute_hamming_matrix(np.array([])).shape == (0, 0)
+    assert np.array_equal(
+        cbu.hamming.compute_hamming_matrix(np.array(["AAAA"])),
+        np.zeros((1, 1), dtype=np.int32),
+    )
 
-    out = cbu.hamming.map2d(x, x, lambda a, b: a * b, symmetry=True)
-    correct = np.array([[1, 2, 3, 4], [2, 4, 6, 8], [3, 6, 9, 12], [4, 8, 12, 16]])
-    assert np.array_equal(out, correct)
+
+def test_compute_hamming_matrix_rejects_unequal_lengths():
+    with pytest.raises(ValueError, match="unequal length"):
+        cbu.hamming.compute_hamming_matrix(np.array(["AAAA", "AAA"]))
 
 
-def test_hamming(monkeypatch):
+def test_hamming():
     x = pd.Series(dict(AAAAAAA=20, AAAABBB=10, BAAAAAB=8, CCCCCCC=10, CCDDCCC=10))
 
-    monkeypatch.setattr(plt, "show", lambda: None)
-    keep, reject, tie = cbu.hamming.hamming_filter(x, min_distance=4)
+    keep, reject, tie = cbu.hamming.hamming_filter(
+        x, min_distance=4, plot=False
+    )
 
     assert (keep == np.array(["AAAAAAA", "CCCCCCC", "CCDDCCC"])).all()
     assert (reject == np.array(["AAAABBB", "BAAAAAB"])).all()

@@ -1,12 +1,19 @@
 import numpy as np
 import pandas as pd
+from pathlib import Path
 from subprocess import run
 import dnaio
 from .CBUclasses import CBUSeries
 from tempfile import TemporaryDirectory
 
 
-def process_larry(files, valid_CBC=None, debug=False):
+def process_larry(
+    files,
+    valid_CBC=None,
+    debug=False,
+    cores=1,
+    intermediate_dir=None,
+):
     """Retrieve CBUSeries from LARRY fastq files
 
     Processes 10x fastq files (read1 and read2) containing LARRY barcode
@@ -24,36 +31,70 @@ def process_larry(files, valid_CBC=None, debug=False):
     debug : bool
         If true the the function returns also the temporary
         directory object, which prevents file cleanup and thus allows inspection.
+    cores : int
+        Number of cores passed to cutadapt.
+    intermediate_dir : path-like, optional
+        Directory in which cutadapt intermediate files are written. When omitted,
+        a unique temporary directory is created in the current working directory.
+        Workflow engines may supply a task-local directory explicitly.
 
     Returns
     -------
-    CBUseries or tuple (CBUSeries, TemporaryDirectory)
-        Returns a CBUSeries object by default or a tuple containig also TemporaryDirectory if debug=True
+    CBUSeries or tuple
+        Returns a CBUSeries by default. With debug=True, also returns the
+        TemporaryDirectory object, or the explicit intermediate directory Path.
 
     """
-    # Making a temporary directory
-    temp = TemporaryDirectory(prefix=".intermediate_cutadapt_", dir="./")
-    tempDIR = temp.name + "/"
+    temp = None
+    if intermediate_dir is None:
+        temp = TemporaryDirectory(prefix=".intermediate_cutadapt_", dir="./")
+        temp_dir = Path(temp.name).resolve()
+    else:
+        temp_dir = Path(intermediate_dir).resolve()
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+    cutadapt_threads = ["-j", str(cores)] if cores is not None else []
 
     # Trimming the files with cutadapt to retain only larry matching barcodes
-    command1 = (
-        f"cutadapt -g TTGCTAGGAGAGACCATATG...ATGTCTGGATCCGATATCGC "
-        f'-o {tempDIR}bar1.fq -p {tempDIR}cbcumi1.fq {files["r2"]} {files["r1"]} '
-        f"--discard-untrimmed --pair-filter=both"
-    )
+    command1 = [
+        "cutadapt",
+        *cutadapt_threads,
+        "-g",
+        "TTGCTAGGAGAGACCATATG...ATGTCTGGATCCGATATCGC",
+        "-o",
+        str(temp_dir / "bar1.fq"),
+        "-p",
+        str(temp_dir / "cbcumi1.fq"),
+        str(files["r2"]),
+        str(files["r1"]),
+        "--discard-untrimmed",
+        "--pair-filter=both",
+    ]
     # Optionally save the report to json format with  --json=test.cutadapt.json
-    out1 = run(command1, capture_output=True, text=True, shell=True)
+    out1 = run(command1, capture_output=True, text=True)
     print(out1.stderr)
     print(out1.stdout)
+    out1.check_returncode()
 
-    command2 = (
-        f'cutadapt -g "NNNNTGNNNNCANNNNACNNNNGANNNNGTNNNNAGNNNN;min_overlap=36" '
-        f"-o {tempDIR}bar2.fq -p {tempDIR}cbcumi2.fq {tempDIR}bar1.fq {tempDIR}cbcumi1.fq "
-        f"--discard-untrimmed --action=retain --pair-filter=both"
-    )
-    out2 = run(command2, capture_output=True, text=True, shell=True)
+    command2 = [
+        "cutadapt",
+        *cutadapt_threads,
+        "-g",
+        "NNNNTGNNNNCANNNNACNNNNGANNNNGTNNNNAGNNNN;min_overlap=36",
+        "-o",
+        str(temp_dir / "bar2.fq"),
+        "-p",
+        str(temp_dir / "cbcumi2.fq"),
+        str(temp_dir / "bar1.fq"),
+        str(temp_dir / "cbcumi1.fq"),
+        "--discard-untrimmed",
+        "--action=retain",
+        "--pair-filter=both",
+    ]
+    out2 = run(command2, capture_output=True, text=True)
     print(out2.stderr)
     print(out2.stdout)
+    out2.check_returncode()
 
     def read_barCBCUMI(x):
         bar = x[0].sequence
@@ -69,8 +110,8 @@ def process_larry(files, valid_CBC=None, debug=False):
             return "WRONG_LEN"
 
     # Accumulating everything in a dictionary with tuples as keys
-    barfile = f"{tempDIR}bar2.fq"
-    cbufile = f"{tempDIR}cbcumi2.fq"
+    barfile = temp_dir / "bar2.fq"
+    cbufile = temp_dir / "cbcumi2.fq"
     if valid_CBC is not None:
         counts = {"WRONG_LEN": 0, "CBC_ABSENT": 0}
         with dnaio.open(file1=barfile, file2=cbufile) as reader:
@@ -117,6 +158,6 @@ def process_larry(files, valid_CBC=None, debug=False):
     print(f"Valid reads: {valid_count} ({valid_count/total_count*100:.2f}%)")
 
     if debug:
-        return counts, temp
+        return counts, temp if temp is not None else temp_dir
     else:
         return counts

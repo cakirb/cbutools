@@ -1,7 +1,6 @@
 import cbutools as cbu
 import numpy as np
 from pathlib import Path
-import matplotlib.pyplot as plt
 import pandas as pd
 import pytest
 
@@ -30,13 +29,11 @@ def test_read_filter():
     assert ref.equals(totest)
 
 
-def test_hamming_filter(monkeypatch):
+def test_hamming_filter():
     pre = cbu.load_barcodes(HERE / "data/cbu_readfiltered.csv").sort_index()
     ref = cbu.load_barcodes(HERE / "data/cbu_hamfiltered.csv").sort_index()
 
-    # The monkeypatch prevents the plot from appearing
-    monkeypatch.setattr(plt, "show", lambda: None)
-    totest = pre.filter_by_hamming(min_distance=3).sort_index()
+    totest = pre.filter_by_hamming(min_distance=3, plot=False).sort_index()
 
     assert ref.equals(totest)
     assert len(totest) - len(pre) == -2

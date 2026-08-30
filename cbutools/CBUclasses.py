@@ -436,7 +436,7 @@ class CBUSeries(pd.Series):
         )
 
     @check_CBU_index
-    def filter_by_hamming(self, which="Barcode", min_distance=2):
+    def filter_by_hamming(self, which="Barcode", min_distance=2, plot=True):
         """Filter based on hamming distance
 
         Filters CBUSeries based on hamming distance for sequenced in the
@@ -450,6 +450,8 @@ class CBUSeries(pd.Series):
             Level of the CBU index to apply the filter on
         min_distance : int
             sequences with distance smaller than min_distance are rejected
+        plot : bool
+            whether to display a histogram of pairwise Hamming distances
 
         Returns
         --------
@@ -460,7 +462,7 @@ class CBUSeries(pd.Series):
 
         counts = self.groupby([which]).sum()
         tokeep, toreject, ties = hamming_filter(
-            counts=counts, min_distance=min_distance
+            counts=counts, min_distance=min_distance, plot=plot
         )
         if len(ties) > 0:
             print(f"Ties detected between: {ties}")
