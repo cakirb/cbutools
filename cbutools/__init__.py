@@ -1,10 +1,14 @@
 from .larry import process_larry
+from .larryv2 import process_larryv2
 from scipy.stats.contingency import crosstab
 import numpy as np
 import pandas as pd
 from . import hamming
 from . import CBUclasses
+from . import recipes
 from .CBUclasses import load_barcodes
+from .extract import process_recipe
+from .recipes import get_recipe, list_recipes, recipe_metadata
 from pathlib import Path
 from subprocess import run
 
@@ -29,16 +33,26 @@ def get_barcodes(
     files : dict
         Dictionary with paths to fastq files, needs to have 'r1' and 'r2' keys
     type : str
-        recipe used to recover barcodes
+        recipe used to recover barcodes. See ``list_recipes()`` for the
+        registered ones and ``recipe_metadata(name)`` for what each implies
+        about barcode length, collapse metric and sensible thresholds.
     valid_CBC : Optional[list, np.ndarray]
         List or array with valid cell barcodes
     save : string
         Path where the barcode counts will be saved
     cores : int
-        Number of cores passed to cutadapt.
+        Number of cores passed to cutadapt. Pass the number your scheduler
+        actually reserved; the default of 1 does not mean "all cores".
     intermediate_dir : path-like, optional
         Directory used for cutadapt intermediate files. If omitted, a unique
         temporary directory is used.
+
+    Raises
+    ------
+    KeyError
+        If no recipe by that name is registered.
+    NotImplementedError
+        If the recipe is registered for its metadata but not yet runnable.
 
     Returns
     --------
@@ -46,14 +60,13 @@ def get_barcodes(
         Returns CBUSeries (derivation of pd.Series) with CBC, Barcode, UMI read counts
 
     """
-    if type == "larry":
-        counts = process_larry(
-            files,
-            valid_CBC=valid_CBC,
-            cores=cores,
-            intermediate_dir=intermediate_dir,
-        )
-        return counts
+    return process_recipe(
+        get_recipe(type),
+        files,
+        valid_CBC=valid_CBC,
+        cores=cores,
+        intermediate_dir=intermediate_dir,
+    )
 
 
 def get_barcodes_report(
