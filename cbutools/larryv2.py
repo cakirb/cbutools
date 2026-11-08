@@ -1,14 +1,14 @@
 """LARRYv2 barcode extraction.
 
-LARRYv2 places a 6 nt construct-identifying prefix and a 28 nt barcode motif
+LARRYv2 places a 6 nt library identifier and a 28 nt barcode motif
 between conserved vector sequence. The motif holds 20 random positions separated
 by the fixed dinucleotides TG, CA, GT, AG -- fewer random positions and fewer
 spacers than LARRY v1's 40-mer, so the two are not interchangeable.
 
 The chemistry is described by the ``larryv2`` entry in :mod:`cbutools.recipes`.
-Every construct is read in one pass and the prefix is kept, giving a 34 bp
-barcode; demultiplex downstream on its first 6 bases using
-``cbutools.recipes.LARRYV2_CONSTRUCTS``.
+Every library is read in one pass and the identifier is kept, giving a 34 bp
+barcode; read the library downstream from its first 6 bases, named by
+``cbutools.recipes.LARRYV2_LIBRARIES``.
 """
 
 from .extract import process_recipe
@@ -29,7 +29,7 @@ def process_larryv2(
     into temporary files). Then the cell barcodes (CBC), LARRYv2 barcodes and
     UMIs are extracted, counted and assembled into a CBUSeries object.
 
-    Barcodes are 34 bp: the 6 nt construct prefix followed by the 28 nt motif.
+    Barcodes are 34 bp: the 6 nt library identifier followed by the 28 nt motif.
 
     Parameters
     ----------

@@ -144,32 +144,35 @@ LARRYv2 is the [Rodriguez-Fraticelli lab](https://www.addgene.org/pooled-library
 
 The motif has 20 random positions and four fixed dinucleotides. LARRY v1's 40-mer has 28 random positions and six, so the two are not interchangeable.
 
-The 6 nt after `CGAT` identifies which construct the barcode came from (`cbutools.recipes.LARRYV2_CONSTRUCTS`):
+The 6 nt after `CGAT` is the library identifier: it says which barcode library the barcode came from. The official libraries are those [distributed by Addgene](https://www.addgene.org/pooled-library/rodriguez-fraticelli-larryv2-barcoding/) (`cbutools.recipes.LARRYV2_LIBRARIES`):
 
-| construct | prefix |
-|---|---|
-| Sapphire1 | `GTTCCA` |
-| Sapphire2 | `TGCTAA` |
-| GFP | `TCCAGT` |
-| Cre | `GCTGAA` |
-| Flp | `CTAGAT` |
+| key | Addgene library | Addgene ID | identifier |
+|---|---|---|---|
+| `tsapphire1` | LARRYv2-T-Sapphire library 1 | 233213 | `GTTCCA` |
+| `tsapphire2` | LARRYv2-T-Sapphire library 2 | 233214 | `TGCTAA` |
+| `egfp1` | LARRYv2-EGFP library 1 | 233215 | `TCCAGT` |
+| `egfp2` | LARRYv2-EGFP library 2 | 233216 | `TGATTG` |
+| `mscarlet` | LARRYv2-mScarlet library | 233697 | `AAGATT` |
 
-Barcodes come back as 34 bp: the construct prefix followed by the motif. Every construct is read in one pass, as the authors' own pipeline (cloneRanger) does. The prefix is kept because it is part of the clone identity: the same random bases under two constructs are two different clones. To split a multiplexed library by construct, use the first 6 bases of the barcode.
+The same table is in the recipe metadata, under `libraries` (`python -m cbutools recipes larryv2`).
+
+Barcodes come back as 34 bp: the library identifier followed by the motif. Every library is read in one pass, as the authors' own pipeline (cloneRanger) does. The identifier is kept because it is part of the clone identity: the same random bases under two libraries are two different clones. To split a multiplexed sample by library, use the first 6 bases of the barcode.
+
+Barcodes with an identifier that isn't in the table extract too, for example the unpublished `GCTGAA` and `CTAGAT` libraries used by Singh et al. 2025. Report them by their sequence.
 
 **Thresholds.** `min_reads` and `min_umis` default to cloneRanger's `reads_cutoff: 5` and `umi_cutoff: 3`.
 
 `collapse_distance` is 3 (merge at d≤2) rather than cloneRanger's d≤4, and this is deliberate:
 
-- cloneRanger keeps the construct as a separate label, so its collapse never compares prefixes.
-- Here the prefix is inside the compared string, and the closest pair of prefixes (`GTTCCA` Sapphire1, `GCTGAA` Cre) is only 3 apart.
-- So at d≤4, two barcodes from different constructs whose random bases differ by one would be fused into one clone. At d≤2 that can't happen.
+- cloneRanger keeps the library as a separate label, so its collapse never compares identifiers.
+- Here the identifier is inside the compared string, and the closest pair of identifiers (`TGCTAA` tsapphire2, `TGATTG` egfp2) is only 3 apart.
+- So at d≤4, two barcodes from different libraries whose random bases differ by one would be fused into one clone. At d≤2 that can't happen.
 
 The cost is negligible. At the ~2.6×10⁻³ per-base error rate measured on real LARRYv2 reads, about 5% of barcodes carry one error and 0.13% carry two, and both are absorbed at d≤2. Barcodes with three or more errors are about 2 in 100,000.
 
 Caveats:
 
 - The flanks were verified on plasmid amplicon data and against cloneRanger's config, not on a 10x read pair. The read layout follows cloneRanger's `read_feature_bc: R2` / `read_cellular_bc: R1`. Confirm it against a real 10x LARRYv2 sample before a production run.
-- cloneRanger's config lists five constructs, and Addgene also lists `AAGATT` for mScarlet. The recipe accepts any 6 nt prefix, so an mScarlet library still extracts.
 
 ### Adding a recipe
 

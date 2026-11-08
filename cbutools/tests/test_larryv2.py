@@ -7,16 +7,16 @@ from pathlib import Path
 import pandas as pd
 
 import cbutools as cbu
-from cbutools.recipes import LARRYV2_CONSTRUCTS
+from cbutools.recipes import LARRYV2_LIBRARIES
 
 HERE = Path(__file__).parent
 
-# The three motifs in the fixtures. Barcodes come back as the 6 nt construct
-# prefix followed by the 28 nt motif.
+# The three motifs in the fixtures. Barcodes come back as the 6 nt library
+# identifier followed by the 28 nt motif.
 M1 = "AAAATGCCCCCATTTTGTGGGGAGACAC"
 M2 = "TTAATGGGCCCAAATTGTCCGGAGTGTG"
 M3 = "CACATGGAGACATCTCGTATATAGCTCT"
-GFP = LARRYV2_CONSTRUCTS["gfp"]
+GFP = LARRYV2_LIBRARIES["egfp1"].identifier
 
 CBC1, CBC2, CBC3 = "AACCTGAAGTATTCCG", "TTTCTGAAGTATTCCG", "GGGGTGAAGTATTCCG"
 UMI1, UMI2, UMI3 = "CGATCAGATGAA", "CGATCAGATGGT", "CGATCAGATCCC"
@@ -94,27 +94,28 @@ def test_count_CBC():
     assert bcu.equals(ref)
 
 
-def test_every_construct_is_kept_and_distinguishable():
-    """One read per construct in, five distinct barcodes out.
+def test_every_library_is_kept_and_distinguishable():
+    """One read per Addgene library in, five distinct barcodes out.
 
-    All five reads share the same 28 nt motif, so the prefix is the only thing
-    telling them apart. That is the point of keeping it: the same random bases
-    under two constructs are two clones, and the construct is recoverable from
-    barcode[:6] with no second pass.
+    All five reads share the same 28 nt motif, so the identifier is the only
+    thing telling them apart. That is the point of keeping it: the same random
+    bases under two libraries are two clones, and the library is recoverable
+    from barcode[:6] with no second pass.
     """
-    bcu = cbu.get_barcodes(files("constructs"), type="larryv2")
+    identifiers = {library.identifier for library in LARRYV2_LIBRARIES.values()}
+    bcu = cbu.get_barcodes(files("libraries"), type="larryv2")
 
     barcodes = sorted(bcu.index.get_level_values("Barcode"))
-    assert barcodes == sorted(prefix + M1 for prefix in LARRYV2_CONSTRUCTS.values())
+    assert barcodes == sorted(identifier + M1 for identifier in identifiers)
 
-    by_construct = {b[:6]: b[6:] for b in barcodes}
-    assert set(by_construct) == set(LARRYV2_CONSTRUCTS.values())
-    assert set(by_construct.values()) == {M1}
+    by_library = {b[:6]: b[6:] for b in barcodes}
+    assert set(by_library) == identifiers
+    assert set(by_library.values()) == {M1}
 
 
 def test_process_larryv2_matches_dispatch():
-    direct = cbu.larryv2.process_larryv2(files("constructs")).sort_index()
-    dispatched = cbu.get_barcodes(files("constructs"), type="larryv2").sort_index()
+    direct = cbu.larryv2.process_larryv2(files("libraries")).sort_index()
+    dispatched = cbu.get_barcodes(files("libraries"), type="larryv2").sort_index()
     assert direct.equals(dispatched)
 
 

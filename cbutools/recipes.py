@@ -80,6 +80,33 @@ class Thresholds:
 
 
 @dataclass(frozen=True)
+class Library:
+    """One officially distributed barcode library of a recipe.
+
+    Some chemistries ship as several libraries whose barcodes start with a
+    short library identifier. The identifier stays inside the extracted barcode;
+    this record only names it, so a caller can say which library a barcode came
+    from.
+
+    Parameters
+    ----------
+    key : str
+        Short machine-friendly name, e.g. ``tsapphire1``.
+    identifier : str
+        The identifier sequence at the start of the barcode.
+    label : str
+        The distributor's name for the library.
+    addgene : int, optional
+        Addgene catalogue number of the pooled library.
+    """
+
+    key: str
+    identifier: str
+    label: str
+    addgene: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class Recipe:
     """A complete barcoding chemistry description.
 
@@ -107,6 +134,10 @@ class Recipe:
         Starting thresholds for a stringent and a permissive pass. Thresholds do
         not transfer between recipes -- a collapse distance of 3 is mild on a
         40 bp barcode and would be drastic on a short one.
+    libraries : tuple of Library
+        Officially distributed libraries, for recipes whose barcodes start with
+        a library identifier. Empty otherwise. Barcodes with an identifier not
+        listed here still extract; the list names libraries, it does not filter.
     whitelist : str, optional
         Where the set of expected barcodes comes from, if one exists. A
         description or URL, not a bundled file -- ``cbutools`` ships no
@@ -135,6 +166,7 @@ class Recipe:
     lenient: Thresholds = field(
         default=Thresholds(min_reads=1, min_umis=1, collapse_distance=2)
     )
+    libraries: Tuple[Library, ...] = ()
     whitelist: Optional[str] = None
     reference: str = ""
     notes: Tuple[str, ...] = ()
@@ -146,6 +178,12 @@ class Recipe:
                 f"Recipe {self.name!r} needs a positive fixed barcode_length; "
                 "Hamming collapse is undefined for sequences of unequal length"
             )
+        for attr in ("key", "identifier"):
+            values = [getattr(library, attr) for library in self.libraries]
+            if len(set(values)) != len(values):
+                raise ValueError(
+                    f"Recipe {self.name!r} lists a library {attr} more than once"
+                )
         if not self.stages and not self.pending:
             raise ValueError(
                 f"Recipe {self.name!r} has no cutadapt stages and no 'pending' "
@@ -188,6 +226,14 @@ class Recipe:
             "collapse_metric": HAMMING,
             "defaults": asdict(self.defaults),
             "lenient": asdict(self.lenient),
+            "libraries": {
+                library.key: {
+                    "identifier": library.identifier,
+                    "label": library.label,
+                    "addgene": library.addgene,
+                }
+                for library in self.libraries
+            },
             "whitelist": self.whitelist,
             "reference": self.reference,
             "notes": list(self.notes),
@@ -253,15 +299,15 @@ _LARRY = Recipe(
 #
 # The anchor is the tail of the paper's Trueseq_LARRY nested-PCR forward primer,
 # and overlaps LARRY v1's own 5' flank (GCTAGGAGAGACCATATG) -- this is conserved
-# vector sequence. The 6 nt after CGAT identifies which construct the barcode
-# came from; see LARRYV2_CONSTRUCTS.
+# vector sequence. The 6 nt after CGAT is the library identifier: it says which
+# barcode library the barcode came from; see LARRYV2_LIBRARIES.
 LARRYV2_ANCHOR = "GCTAGGAGAGACCATATGGGATCCGAT"
 
 # First 9 nt of the constant region that follows the barcode. Measured over
 # 287k pattern-matching reads, the exact-match rate is 99.02% at 6 nt, 98.91% at
 # 9 and 98.53% at 15, so the region is genuinely invariant and the extra length
 # is nearly free; the ~1% residual is ordinary substitution and indel error, not
-# a second construct. Nine keeps headroom on shorter read 2 lengths -- extend to
+# a second library. Nine keeps headroom on shorter read 2 lengths -- extend to
 # ATCGCCACCGTG if you want more specificity and your reads allow it.
 LARRYV2_FLANK3 = "ATCGCCACC"
 
@@ -269,41 +315,50 @@ LARRYV2_FLANK3 = "ATCGCCACC"
 # from LARRY v1's: TG, CA, GT, AG here, against TG, CA, AC, GA, GT, AG there.
 LARRYV2_MOTIF = "NNNNTGNNNNCANNNNGTNNNNAGNNNN"
 
-#: Construct-identifying 6 nt prefix, from cloneRanger's config/larry_config.yaml.
+#: The official LARRYv2 barcode libraries distributed by Addgene
+#: (addgene.org/pooled-library/rodriguez-fraticelli-larryv2-barcoding/). Each
+#: barcode starts with its library's 6 nt identifier; the depositor's figure
+#: gives them as "GTTCCA-barcode for LARRYv2 T-Sapphire library 1" and so on.
+#: The two libraries of one fluorophore share a backbone and differ only in the
+#: barcode oligo pool. mScarlet (233697) was listed as back-ordered when checked
+#: on 2026-11-08.
 #:
-#: These are not separate recipes. cloneRanger holds all five in one
-#: ``bc_patterns`` map and applies them together in a single pass, keeping the
-#: construct with each barcode; there is no per-sample setting that selects
-#: one. ``larryv2`` follows that shape: the prefix stays inside the barcode, so
-#: the construct is part of the clone identity and a multiplexed library comes
-#: back whole. Demultiplex downstream on ``barcode[:6]``.
+#: These are not separate recipes. Every library is read in one pass and the
+#: identifier stays inside the barcode, so the library is part of the clone
+#: identity and a multiplexed sample comes back whole. Read the library from
+#: ``barcode[:6]``.
 #:
-#: The map is kept for that downstream use, and because it bounds how far
-#: ``larryv2`` may collapse -- see LARRYV2_MIN_PREFIX_DISTANCE.
-LARRYV2_CONSTRUCTS = {
-    "sapphire1": "GTTCCA",
-    "sapphire2": "TGCTAA",
-    "gfp": "TCCAGT",
-    "cre": "GCTGAA",
-    "flp": "CTAGAT",
+#: Identifiers not listed here extract just the same. Singh et al. 2025 (STRACK),
+#: for example, also used the lab's unpublished GCTGAA and CTAGAT libraries;
+#: callers should report such identifiers by sequence rather than guess a name.
+LARRYV2_LIBRARIES: Dict[str, Library] = {
+    library.key: library
+    for library in (
+        Library("tsapphire1", "GTTCCA", "LARRYv2-T-Sapphire library 1", 233213),
+        Library("tsapphire2", "TGCTAA", "LARRYv2-T-Sapphire library 2", 233214),
+        Library("egfp1", "TCCAGT", "LARRYv2-EGFP library 1", 233215),
+        Library("egfp2", "TGATTG", "LARRYv2-EGFP library 2", 233216),
+        Library("mscarlet", "AAGATT", "LARRYv2-mScarlet library", 233697),
+    )
 }
 
-#: Minimum pairwise Hamming distance between the construct prefixes: 3, between
-#: GTTCCA (sapphire1) and GCTGAA (cre). Collapse runs on the whole 34 bp string,
-#: prefix included, so it cannot fuse two constructs' barcodes exactly while
-#: collapse_distance <= this value. tests/test_recipes.py asserts that, so adding
-#: a construct with a closer prefix fails there rather than in clone calls.
+#: Minimum pairwise Hamming distance between the library identifiers: 3, between
+#: TGCTAA (tsapphire2) and TGATTG (egfp2). Collapse runs on the whole 34 bp
+#: string, identifier included, so it cannot fuse barcodes from two libraries
+#: while collapse_distance <= this value. tests/test_recipes.py asserts that, so
+#: adding a library with a closer identifier fails there rather than in clone
+#: calls.
 LARRYV2_MIN_PREFIX_DISTANCE = 3
 
 _LARRYV2 = Recipe(
     name="larryv2",
     label="LARRYv2",
     description=(
-        "LARRYv2 lineage barcode, 34 bp: the 6 nt construct prefix followed by "
-        "the 28 nt barcode motif, expressed from an "
-        "EF1a-Reporter-WPRE-barcode-pA construct. Every construct is read in "
-        "one pass and the prefix is kept, so a multiplexed library comes back "
-        "whole."
+        "LARRYv2 lineage barcode, 34 bp: the 6 nt library identifier followed "
+        "by the 28 nt barcode motif, expressed from an "
+        "EF1a-Reporter-WPRE-barcode-pA construct. Every library is read in "
+        "one pass and the identifier is kept, so a multiplexed sample comes "
+        "back whole."
     ),
     barcode_length=34,
     stages=(
@@ -313,7 +368,7 @@ _LARRYV2 = Recipe(
                 f"...{LARRYV2_FLANK3};min_overlap={len(LARRYV2_FLANK3)};required"
             ),
             description=(
-                "Cut the construct prefix and barcode out from between the "
+                "Cut the library identifier and barcode out from between the "
                 "vector anchor and the downstream constant region."
             ),
         ),
@@ -321,12 +376,12 @@ _LARRYV2 = Recipe(
             # e=0 so the eight fixed spacer bases must match exactly. At
             # cutadapt's default 10% rate a 34 nt adapter would tolerate three
             # errors, which is more than half the fixed content of the motif.
-            # The prefix is left as NNNNNN, so a construct outside
-            # LARRYV2_CONSTRUCTS (e.g. mScarlet) still extracts.
+            # The identifier is left as NNNNNN, so a library outside
+            # LARRYV2_LIBRARIES still extracts.
             adapter=f"{'N' * 6}{LARRYV2_MOTIF};min_overlap=34;e=0",
             action="retain",
             description=(
-                "Require the barcode motif: six unconstrained prefix bases "
+                "Require the barcode motif: six unconstrained identifier bases "
                 "then 20 random positions separated by the fixed dinucleotides "
                 "TG, CA, GT, AG. Retained rather than trimmed."
             ),
@@ -334,45 +389,48 @@ _LARRYV2 = Recipe(
     ),
     # min_reads and min_umis are cloneRanger's reads_cutoff: 5 and umi_cutoff: 3.
     # collapse_distance is NOT cloneRanger's: its hamming_distance: 4 (d<=4) is
-    # safe there because it keeps the construct as a label beside the barcode.
-    # Here the prefix is inside the compared string, and at d<=4 two barcodes
-    # from constructs 3 apart whose random parts differ by one base would fuse.
+    # safe there because it keeps the library as a label beside the barcode.
+    # Here the identifier is inside the compared string, and at d<=4 two
+    # barcodes from libraries 3 apart whose random parts differ by one base
+    # would fuse.
     # 3 (d<=2) makes that impossible, and still absorbs essentially all real
     # error: at REQ-72680's ~2.6e-3 per base, about 5% of barcodes carry one
     # error, 0.13% two, and 0.002% three or more.
     defaults=Thresholds(min_reads=5, min_umis=3, collapse_distance=3, dispr_filter=0.1),
     lenient=Thresholds(min_reads=1, min_umis=2, collapse_distance=3, dispr_filter=0.1),
+    libraries=tuple(LARRYV2_LIBRARIES.values()),
     whitelist=(
         "Library-specific; supplied with the Addgene pooled library. Whitelist "
-        "entries should be the 34 bp prefix+motif, so one list spans constructs."
+        "entries should be the 34 bp identifier+motif, so one list spans libraries."
     ),
     reference=(
-        "Rodriguez-Fraticelli lab LARRYv2 libraries "
-        "(addgene.org/pooled-library/rodriguez-fraticelli-larryv2-barcoding/); "
-        "structure cross-checked against cloneRanger config/larry_config.yaml "
-        "(github.com/dfernandezperez/cloneRanger)"
+        "Rodriguez-Fraticelli lab LARRYv2 libraries; library names and "
+        "identifiers from Addgene "
+        "(addgene.org/pooled-library/rodriguez-fraticelli-larryv2-barcoding/). "
+        "Read structure cross-checked against cloneRanger "
+        "config/larry_config.yaml (github.com/dfernandezperez/cloneRanger)."
     ),
     notes=(
-        "The first 6 bases of each barcode identify the construct "
-        "(LARRYV2_CONSTRUCTS). The same random bases under two different "
-        "prefixes are two clones, which is why the prefix is kept.",
+        "The first 6 bases of each barcode identify the Addgene library "
+        "(see libraries). The same random bases under two different "
+        "identifiers are two clones, which is why the identifier is kept.",
+        "Identifiers outside the listed libraries extract too, e.g. the "
+        "unpublished GCTGAA and CTAGAT libraries in Singh et al. 2025. Report "
+        "them by sequence; the list names libraries, it does not filter them.",
         "collapse_distance is 3, not cloneRanger's d<=4 (which would be 5 "
-        "here). Collapse runs on the whole string, prefix included, and the "
-        "closest prefixes (GTTCCA sapphire1, GCTGAA cre) are only 3 apart. If "
-        "the caller ever groups barcodes by prefix before collapsing -- as "
-        "cloneRanger does -- 5 becomes safe within each group.",
+        "here). Collapse runs on the whole string, identifier included, and the "
+        "closest identifiers (TGCTAA tsapphire2, TGATTG egfp2) are only 3 apart. "
+        "If the caller ever groups barcodes by identifier before collapsing -- "
+        "as cloneRanger does -- 5 becomes safe within each group.",
         "The 20 random positions are not equimolar (roughly A 24%, C 19%, G 23%, "
         "T 34%), so effective diversity is about 6.7e11 rather than 4^20 = 1.1e12.",
         "These thresholds are for single-cell scale (~1e3-1e5 barcodes). Do not "
         "reuse them for plasmid library diversity estimation, where the "
         "library is three orders of magnitude larger.",
-        "The flanks were verified on plasmid amplicon data (REQ-72680, GFP "
-        "construct) and against cloneRanger, not on a 10x read pair. The read "
+        "The flanks were verified on plasmid amplicon data (REQ-72680, EGFP "
+        "library 1) and against cloneRanger, not on a 10x read pair. The read "
         "layout follows cloneRanger's read_feature_bc: R2 / read_cellular_bc: "
         "R1; confirm against a real 10x LARRYv2 sample before a production run.",
-        "cloneRanger's config lists five constructs; Addgene also lists AAGATT "
-        "for mScarlet. The motif stage accepts any 6 nt prefix, so an mScarlet "
-        "library still extracts; add it to LARRYV2_CONSTRUCTS once confirmed.",
     ),
 )
 

@@ -12,9 +12,10 @@ import pytest
 import cbutools as cbu
 from cbutools.extract import process_recipe
 from cbutools.recipes import (
-    LARRYV2_CONSTRUCTS,
+    LARRYV2_LIBRARIES,
     LARRYV2_MIN_PREFIX_DISTANCE,
     CutadaptStage,
+    Library,
     Recipe,
     Thresholds,
     get_recipe,
@@ -125,26 +126,26 @@ def _hamming(a, b):
     return sum(x != y for x, y in zip(a, b))
 
 
-def test_construct_prefixes_are_far_enough_apart_to_collapse_safely():
-    """larryv2 must not be able to fuse barcodes from different constructs.
+def test_library_identifiers_are_far_enough_apart_to_collapse_safely():
+    """larryv2 must not be able to fuse barcodes from different libraries.
 
-    It keeps the 6 nt construct prefix inside a 34 bp barcode, and collapse runs
-    on the whole string, so the prefix is treated as mutable sequence when it is
-    not. A cross-construct pair is at least LARRYV2_MIN_PREFIX_DISTANCE apart;
-    collapsing is exclusive, so it is safe exactly while
+    It keeps the 6 nt library identifier inside a 34 bp barcode, and collapse
+    runs on the whole string, so the identifier is treated as mutable sequence
+    when it is not. A cross-library pair is at least LARRYV2_MIN_PREFIX_DISTANCE
+    apart; collapsing is exclusive, so it is safe exactly while
 
-        collapse_distance <= min pairwise prefix distance.
+        collapse_distance <= min pairwise identifier distance.
 
-    This guards a bug that was real at collapse_distance=5: the closest prefixes
-    (GTTCCA sapphire1, GCTGAA cre) are 3 apart, so two barcodes from different
-    constructs whose random portions differed by one base merged into one clone.
+    This guards a bug that was real at collapse_distance=5: the closest
+    identifiers (TGCTAA tsapphire2, TGATTG egfp2) are 3 apart, so two barcodes
+    from different libraries whose random portions differed by one base would
+    merge into one clone.
 
-    It also guards the future: adding a sixth construct whose prefix sits closer
-    to an existing one fails here rather than silently in someone's clone calls.
+    It also guards the future: adding a library whose identifier sits closer to
+    an existing one fails here rather than silently in someone's clone calls.
     """
-    distances = [
-        _hamming(a, b) for a, b in combinations(LARRYV2_CONSTRUCTS.values(), 2)
-    ]
+    identifiers = [library.identifier for library in LARRYV2_LIBRARIES.values()]
+    distances = [_hamming(a, b) for a, b in combinations(identifiers, 2)]
     assert min(distances) == LARRYV2_MIN_PREFIX_DISTANCE
 
     larryv2 = get_recipe("larryv2")
@@ -176,6 +177,44 @@ def test_recipe_requires_a_fixed_barcode_length(length):
             description="",
             barcode_length=length,
             stages=(CutadaptStage(adapter="A...B"),),
+        )
+
+
+def test_larryv2_metadata_lists_the_addgene_libraries():
+    """nf-larry names libraries from this metadata instead of copying them."""
+    libraries = recipe_metadata("larryv2")["libraries"]
+    assert {key: value["identifier"] for key, value in libraries.items()} == {
+        "tsapphire1": "GTTCCA",
+        "tsapphire2": "TGCTAA",
+        "egfp1": "TCCAGT",
+        "egfp2": "TGATTG",
+        "mscarlet": "AAGATT",
+    }
+    assert libraries["tsapphire1"] == {
+        "identifier": "GTTCCA",
+        "label": "LARRYv2-T-Sapphire library 1",
+        "addgene": 233213,
+    }
+    # Recipes without library identifiers still carry the key, empty.
+    assert recipe_metadata("larry")["libraries"] == {}
+
+
+@pytest.mark.parametrize(
+    "libraries",
+    [
+        (Library("a", "AAAAAA", "A"), Library("a", "CCCCCC", "A again")),
+        (Library("a", "AAAAAA", "A"), Library("b", "AAAAAA", "B")),
+    ],
+)
+def test_recipe_rejects_duplicate_libraries(libraries):
+    with pytest.raises(ValueError, match="more than once"):
+        Recipe(
+            name="bad",
+            label="Bad",
+            description="",
+            barcode_length=34,
+            stages=(CutadaptStage(adapter="A...B"),),
+            libraries=libraries,
         )
 
 
