@@ -138,6 +138,11 @@ class Recipe:
         Officially distributed libraries, for recipes whose barcodes start with
         a library identifier. Empty otherwise. Barcodes with an identifier not
         listed here still extract; the list names libraries, it does not filter.
+    library_identifier_length : int, optional
+        Length of the library identifier at the start of every barcode, for
+        recipes that have one. ``None`` means the barcode carries no identifier;
+        then ``libraries`` must be empty and :meth:`library_of` returns
+        ``None``.
     whitelist : str, optional
         Where the set of expected barcodes comes from, if one exists. A
         description or URL, not a bundled file -- ``cbutools`` ships no
@@ -167,6 +172,7 @@ class Recipe:
         default=Thresholds(min_reads=1, min_umis=1, collapse_distance=2)
     )
     libraries: Tuple[Library, ...] = ()
+    library_identifier_length: Optional[int] = None
     whitelist: Optional[str] = None
     reference: str = ""
     notes: Tuple[str, ...] = ()
@@ -184,6 +190,25 @@ class Recipe:
                 raise ValueError(
                     f"Recipe {self.name!r} lists a library {attr} more than once"
                 )
+        n = self.library_identifier_length
+        if n is None:
+            if self.libraries:
+                raise ValueError(
+                    f"Recipe {self.name!r} lists libraries but no "
+                    "library_identifier_length"
+                )
+        else:
+            if not isinstance(n, int) or not 0 < n < self.barcode_length:
+                raise ValueError(
+                    f"Recipe {self.name!r} needs a library_identifier_length "
+                    f"between 1 and {self.barcode_length - 1}, not {n!r}"
+                )
+            for library in self.libraries:
+                if len(library.identifier) != n:
+                    raise ValueError(
+                        f"Recipe {self.name!r}: library {library.key!r} has "
+                        f"identifier {library.identifier!r}, not {n} nt long"
+                    )
         if not self.stages and not self.pending:
             raise ValueError(
                 f"Recipe {self.name!r} has no cutadapt stages and no 'pending' "
@@ -208,6 +233,28 @@ class Recipe:
         """Whether an extracted barcode has an acceptable length."""
         return len(barcode) == self.barcode_length
 
+    def library_of(self, barcode: str) -> Optional[str]:
+        """Name the library an extracted barcode came from.
+
+        Returns the library key when the barcode's identifier is one of
+        ``libraries``, and the identifier sequence itself when it is not, so an
+        unlisted library is reported by sequence rather than given a guessed
+        name. Returns ``None`` when the recipe has no library identifier, or
+        when ``barcode`` is not a barcode of this recipe (wrong length).
+
+        Workflows reading the JSON metadata apply the same rule: take the first
+        ``library_identifier_length`` bases and look them up in ``libraries``.
+        """
+        if self.library_identifier_length is None or not self.accepts_barcode(
+            barcode
+        ):
+            return None
+        identifier = barcode[: self.library_identifier_length]
+        for library in self.libraries:
+            if library.identifier == identifier:
+                return library.key
+        return identifier
+
     def to_dict(self) -> Dict:
         """Return a JSON-serialisable description of the recipe.
 
@@ -226,6 +273,7 @@ class Recipe:
             "collapse_metric": HAMMING,
             "defaults": asdict(self.defaults),
             "lenient": asdict(self.lenient),
+            "library_identifier_length": self.library_identifier_length,
             "libraries": {
                 library.key: {
                     "identifier": library.identifier,
@@ -325,8 +373,8 @@ LARRYV2_MOTIF = "NNNNTGNNNNCANNNNGTNNNNAGNNNN"
 #:
 #: These are not separate recipes. Every library is read in one pass and the
 #: identifier stays inside the barcode, so the library is part of the clone
-#: identity and a multiplexed sample comes back whole. Read the library from
-#: ``barcode[:6]``.
+#: identity and a multiplexed sample comes back whole. Read the library with
+#: ``Recipe.library_of``, or from the first ``library_identifier_length`` bases.
 #:
 #: Identifiers not listed here extract just the same. Singh et al. 2025 (STRACK),
 #: for example, also used the lab's unpublished GCTGAA and CTAGAT libraries;
@@ -399,6 +447,7 @@ _LARRYV2 = Recipe(
     defaults=Thresholds(min_reads=5, min_umis=3, collapse_distance=3, dispr_filter=0.1),
     lenient=Thresholds(min_reads=1, min_umis=2, collapse_distance=3, dispr_filter=0.1),
     libraries=tuple(LARRYV2_LIBRARIES.values()),
+    library_identifier_length=6,
     whitelist=(
         "Library-specific; supplied with the Addgene pooled library. Whitelist "
         "entries should be the 34 bp identifier+motif, so one list spans libraries."

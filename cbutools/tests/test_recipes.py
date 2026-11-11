@@ -195,8 +195,37 @@ def test_larryv2_metadata_lists_the_addgene_libraries():
         "label": "LARRYv2-T-Sapphire library 1",
         "addgene": 233213,
     }
-    # Recipes without library identifiers still carry the key, empty.
+    # Recipes without library identifiers still carry the keys, empty.
     assert recipe_metadata("larry")["libraries"] == {}
+
+
+def test_library_identifier_length_is_in_the_metadata():
+    """nf-larry reads the identifier length here instead of hardcoding 6."""
+    assert recipe_metadata("larryv2")["library_identifier_length"] == 6
+    assert recipe_metadata("larry")["library_identifier_length"] is None
+
+
+MOTIF = "ACGTTGACGTCAACGTGTACGTAGACGT"
+
+
+@pytest.mark.parametrize(
+    "barcode, expected",
+    [
+        ("TCCAGT" + MOTIF, "egfp1"),
+        ("AAGATT" + MOTIF, "mscarlet"),
+        # Unlisted identifiers come back as their sequence, not a guessed name.
+        ("GCTGAA" + MOTIF, "GCTGAA"),
+        # Not a 34 bp barcode, so not a larryv2 barcode at all.
+        ("TCCAGT" + MOTIF[:-1], None),
+        ("TCC", None),
+    ],
+)
+def test_library_of(barcode, expected):
+    assert get_recipe("larryv2").library_of(barcode) == expected
+
+
+def test_library_of_is_none_without_identifiers():
+    assert get_recipe("larry").library_of("A" * 40) is None
 
 
 @pytest.mark.parametrize(
@@ -215,7 +244,40 @@ def test_recipe_rejects_duplicate_libraries(libraries):
             barcode_length=34,
             stages=(CutadaptStage(adapter="A...B"),),
             libraries=libraries,
+            library_identifier_length=6,
         )
+
+
+def _recipe_with(libraries, length):
+    return Recipe(
+        name="bad",
+        label="Bad",
+        description="",
+        barcode_length=34,
+        stages=(CutadaptStage(adapter="A...B"),),
+        libraries=libraries,
+        library_identifier_length=length,
+    )
+
+
+@pytest.mark.parametrize(
+    "libraries, length, message",
+    [
+        ((Library("a", "AAAAAA", "A"),), None, "no library_identifier_length"),
+        ((Library("a", "AAAAA", "A"),), 6, "not 6 nt long"),
+        ((), 0, "between 1 and 33"),
+        ((), 34, "between 1 and 33"),
+    ],
+)
+def test_recipe_checks_library_identifier_length(libraries, length, message):
+    with pytest.raises(ValueError, match=message):
+        _recipe_with(libraries, length)
+
+
+def test_identifier_length_without_listed_libraries_is_allowed():
+    """A chemistry may carry identifiers before anyone has named them."""
+    recipe = _recipe_with((), 6)
+    assert recipe.library_of("GCTGAA" + "A" * 28) == "GCTGAA"
 
 
 def test_recipe_requires_stages_or_an_explanation():

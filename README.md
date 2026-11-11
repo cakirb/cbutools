@@ -154,9 +154,20 @@ The 6 nt after `CGAT` is the library identifier: it says which barcode library t
 | `egfp2` | LARRYv2-EGFP library 2 | 233216 | `TGATTG` |
 | `mscarlet` | LARRYv2-mScarlet library | 233697 | `AAGATT` |
 
-The same table is in the recipe metadata, under `libraries` (`python -m cbutools recipes larryv2`).
+The same table is in the recipe metadata, under `libraries` (`python -m cbutools recipes larryv2`), next to `library_identifier_length` (6). Recipes without identifiers, such as `larry`, give `{}` and `null`.
 
-Barcodes come back as 34 bp: the library identifier followed by the motif. Every library is read in one pass, as the authors' own pipeline (cloneRanger) does. The identifier is kept because it is part of the clone identity: the same random bases under two libraries are two different clones. To split a multiplexed sample by library, use the first 6 bases of the barcode.
+To name the library of a barcode, take its first `library_identifier_length` bases and look them up in `libraries`; an identifier that isn't listed is reported as its sequence. In Python, `Recipe.library_of` does exactly that:
+
+```python
+from cbutools.recipes import get_recipe
+
+larryv2 = get_recipe("larryv2")
+larryv2.library_of("TCCAGT" + "ACGTTGACGTCAACGTGTACGTAGACGT")  # 'egfp1'
+larryv2.library_of("GCTGAA" + "ACGTTGACGTCAACGTGTACGTAGACGT")  # 'GCTGAA', unlisted
+get_recipe("larry").library_of("A" * 40)                       # None, no identifier
+```
+
+Barcodes come back as 34 bp: the library identifier followed by the motif. Every library is read in one pass, as the authors' own pipeline (cloneRanger) does. The identifier is kept because it is part of the clone identity: the same random bases under two libraries are two different clones. To split a multiplexed sample by library, use `library_of` or the first 6 bases of the barcode.
 
 Barcodes with an identifier that isn't in the table extract too, for example the unpublished `GCTGAA` and `CTAGAT` libraries used by Singh et al. 2025. Report them by their sequence.
 
